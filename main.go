@@ -110,15 +110,43 @@ func (app *App) speedTestHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. Parse the output - handle multiple JSON lines
+	outputStr := string(output)
+	lines := strings.Split(strings.TrimSpace(outputStr), "\n")
+
 	var cliResult SpeedtestCliOutput
-	if err := json.Unmarshal(output, &cliResult); err != nil {
-		log.Printf("Failed to parse speedtest JSON: %s", err)
+	var resultFound bool
+
+	// Look for the result line (type: "result")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Try to parse each line as JSON
+		var tempResult SpeedtestCliOutput
+		if err := json.Unmarshal([]byte(line), &tempResult); err != nil {
+			log.Printf("Failed to parse line as JSON: %s", line)
+			continue
+		}
+
+		// If this is a result line, use it
+		if tempResult.Type == "result" {
+			cliResult = tempResult
+			resultFound = true
+			break
+		}
+	}
+
+	if !resultFound {
+		log.Printf("No valid result found in speedtest output: %s", outputStr)
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(AgentResponse{Error: "Failed to parse speedtest-cli output: " + err.Error()})
+		json.NewEncoder(w).Encode(AgentResponse{Error: "No valid speedtest result found in output"})
 		return
 	}
 
-	// 3. Format and return the response
+	// 4. Format and return the response
 	// Convert bandwidth from bytes/sec to MB/s
 	downloadMBS := float64(cliResult.Download.Bandwidth) / 8 / 1e6
 	uploadMBS := float64(cliResult.Upload.Bandwidth) / 8 / 1e6
